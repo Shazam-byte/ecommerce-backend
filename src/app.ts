@@ -23,25 +23,16 @@ import { runMigrations } from "./db/migrations";
 const app = express();
 
 // Configure CORS to permit the decoupled frontend to speak to our endpoint
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      // In development, we permit all to facilitate cross-origin developer setups.
-      // In production, we respect FRONTEND_URL.
-      if (!origin || process.env.NODE_ENV !== "production") {
-        callback(null, true);
-      } else {
-        const allowed = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : [];
-        if (allowed.includes(origin) || allowed.some(url => origin.includes(url))) {
-          callback(null, true);
-        } else {
-          callback(new Error("CORS policy violation. Request source block."));
-        }
-      }
-    },
-    credentials: true,
-  })
-);
+app.use(cors({
+  origin: [
+    'http://ecommerce-frontend-shah.s3-website-us-east-1.amazonaws.com',
+    'http://localhost:5173',
+    'http://localhost:3000'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}))
 
 // Body parsers
 app.use(express.json());
