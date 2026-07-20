@@ -103,9 +103,13 @@ No hardcoded AWS credentials anywhere in the codebase. EC2 accesses S3 via an at
 Make sure Docker and Docker Compose are installed.
 
 \```bash
+
 git clone https://github.com/Shazam-byte/ecommerce-app-complete-containerized.git
+
 cd ecommerce-app-complete-containerized-main
+
 docker-compose up --build
+
 \```
 
 Open http://localhost in your browser.
