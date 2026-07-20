@@ -149,12 +149,11 @@ export async function runMySQLMigrations() {
   // 8. Add Initial Admin User
   try {
     const adminEmail = "admin@admin.com";
-    // Fix: Use ? instead of $1 for MySQL, and destructure rows array directly
-    const [rows] = await query("SELECT id FROM users WHERE email = ?", [adminEmail]);
-    if (!rows || rows.length === 0) {
+    const checkAdmin = await query("SELECT id FROM users WHERE email = $1", [adminEmail]);
+    if (checkAdmin.rows.length === 0) {
       const adminPasswordHash = await bcrypt.hash("admin123", 10);
       await query(
-        "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)",
+        "INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)",
         [adminEmail, adminPasswordHash, "admin"]
       );
       console.log(`MIGRATE_JS: [SUCCESS] Seeded default administrator account: ${adminEmail}`);

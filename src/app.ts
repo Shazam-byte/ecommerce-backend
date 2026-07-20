@@ -19,11 +19,8 @@ import adminRouter from "./routes/admin.routes";
 
 import { authenticateToken } from "./middleware/auth";
 import { runMigrations } from "./db/migrations";
-import { waitForDatabase } from "./db/connection";
 
 const app = express();
-
-let isDatabaseReady = false;
 
 // Configure CORS to permit the decoupled frontend to speak to our endpoint
 app.use(cors({
@@ -31,13 +28,12 @@ app.use(cors({
     'd3g7a1twk7q2ux.cloudfront.net',
     'http://ecommerce-frontend-shah.s3-website-us-east-1.amazonaws.com',
     'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost'
+    'http://localhost:3000'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+}))
 
 // Body parsers
 app.use(express.json());
@@ -62,13 +58,24 @@ app.use("/api/admin", adminRouter);
 // Service Health check endpoint
 app.get("/api/health", (req, res) => {
   res.json({
-    status: isDatabaseReady ? "healthy" : "initializing",
+    status: "healthy",
     timestamp: new Date(),
     uptime: process.uptime(),
   });
 });
 
-// Middleware defense for incoming requests during DB startup
+// Run migrations on startup
+let isDatabaseReady = false;
+runMigrations()
+  .then(() => {
+    isDatabaseReady = true;
+    console.log("APP_STARTUP: Database initialized and ready.");
+  })
+  .catch((err) => {
+    console.error("APP_STARTUP: Database migration failed. Serving API with connection issues.", err);
+  });
+
+// Endpoint block defense for pending DB migrations
 app.use((req, res, next) => {
   if (!isDatabaseReady && req.path.startsWith("/api")) {
     return res.status(503).json({
@@ -85,11 +92,12 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
 
   const status = err.status || 500;
   
-  if (err.code === "23505" || err.code === "ER_DUP_ENTRY") {
+  // Format Postgres error codes
+  if (err.code === "23505") {
     return res.status(400).json({
       error: "Resource already exists. Unique constraint conflict.",
       code: "CONFLICT_ERROR",
-      details: err.detail || err.sqlMessage,
+      details: err.detail,
     });
   }
 
@@ -98,28 +106,5 @@ app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     code: err.code || "INTERNAL_SERVER_ERROR",
   });
 });
-
-const PORT = process.env.PORT || 5000;
-
-async function startServer() {
-  try {
-    // 1. Wait for MySQL to finish initializing temporary server setup
-    await waitForDatabase();
-
-    // 2. Run Database Migrations safely
-    await runMigrations();
-    isDatabaseReady = true;
-    console.log("APP_STARTUP: Database initialized and ready.");
-
-    // 3. Start Express HTTP Server
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  } catch (err) {
-    console.error("APP_STARTUP: Critical failure during application startup:", err);
-  }
-}
-
-startServer();
 
 export default app;
