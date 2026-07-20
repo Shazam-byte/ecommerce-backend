@@ -1,19 +1,10 @@
 import { query } from "./connection";
 import bcrypt from "bcrypt";
 
-// Mutex flag to prevent simultaneous execution within the same Node process
-let isMigrating = false;
-
 export async function runMigrations() {
-  if (isMigrating) {
-    console.log("DB_MIGRATIONS: Migration already in progress, skipping duplicate call.");
-    return;
-  }
-  isMigrating = true;
+  console.log("DB_MIGRATIONS: Starting database schema migrations...");
 
   try {
-    console.log("DB_MIGRATIONS: Starting database initialization...");
-
     // 1. Users Table
     await query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -22,8 +13,9 @@ export async function runMigrations() {
         password_hash VARCHAR(255) NOT NULL,
         role VARCHAR(50) DEFAULT 'user' NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'users' table.");
 
     // 2. Categories Table
     await query(`
@@ -32,8 +24,9 @@ export async function runMigrations() {
         name VARCHAR(100) UNIQUE NOT NULL,
         slug VARCHAR(100) UNIQUE NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'categories' table.");
 
     // 3. Products Table
     await query(`
@@ -45,11 +38,12 @@ export async function runMigrations() {
         description TEXT,
         price DECIMAL(10,2) NOT NULL,
         stock INT DEFAULT 0 NOT NULL,
-        images TEXT,
+        images TEXT, -- JSON string representing string array of URLs
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'products' table.");
 
     // 4. Cart Items Table
     await query(`
@@ -62,8 +56,9 @@ export async function runMigrations() {
         CONSTRAINT unique_user_product UNIQUE (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'cart_items' table.");
 
     // 5. Orders Table
     await query(`
@@ -77,8 +72,9 @@ export async function runMigrations() {
         payment_status VARCHAR(50) NOT NULL DEFAULT 'paid',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'orders' table.");
 
     // 6. Order Items Table
     await query(`
@@ -92,8 +88,9 @@ export async function runMigrations() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE SET NULL
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'order_items' table.");
 
     // 7. Reviews Table
     await query(`
@@ -107,60 +104,44 @@ export async function runMigrations() {
         CONSTRAINT unique_user_product_review UNIQUE (user_id, product_id),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE
-      ) ENGINE=InnoDB;
+      )
     `);
+    console.log("DB_MIGRATIONS: [OK] Checked 'reviews' table.");
 
-    console.log("DB_MIGRATIONS: [OK] Schema created/verified.");
-
-    // 8. Seed Data safely
+    // 8. Seeding categories and products if empty
     await seedInitialData();
 
-    console.log("DB_MIGRATIONS: All migrations passed and database synchronized.");
+    console.log("DB_MIGRATIONS: All migrations check passed and databases synchronized.");
   } catch (error) {
     console.error("DB_MIGRATIONS: Migration failure!", error);
     throw error;
-  } finally {
-    isMigrating = false;
   }
 }
 
 async function seedInitialData() {
-  // 1. Seed Categories using INSERT IGNORE (safe against duplicates)
-  const defaultCategories = [
-    ["Electronics", "electronics"],
-    ["Apparel", "apparel"],
-    ["Books", "books"],
-    ["Home & Kitchen", "home-kitchen"]
-  ];
+  // Check if categories are already present
+  const checkCategory = await query("SELECT COUNT(*) as count FROM categories");
+  const categoryCount = parseInt(checkCategory.rows[0].count, 10);
 
-  for (const [name, slug] of defaultCategories) {
-    await query(
-      "INSERT IGNORE INTO categories (name, slug) VALUES (?, ?)",
-      [name, slug]
-    );
-  }
+  if (categoryCount === 0) {
+    console.log("DB_MIGRATIONS: Database empty, seeding default categories...");
+    
+    // Seed Categories
+    await query("INSERT INTO categories (name, slug) VALUES ($1, $2)", ["Electronics", "electronics"]);
+    await query("INSERT INTO categories (name, slug) VALUES ($1, $2)", ["Apparel", "apparel"]);
+    await query("INSERT INTO categories (name, slug) VALUES ($1, $2)", ["Books", "books"]);
+    await query("INSERT INTO categories (name, slug) VALUES ($1, $2)", ["Home & Kitchen", "home-kitchen"]);
 
-  // Build ID mapping directly from DB after ensuring rows exist
-  const categoriesRowsResult: any = await query("SELECT id, name FROM categories");
-  const rows = Array.isArray(categoriesRowsResult[0]) ? categoriesRowsResult[0] : categoriesRowsResult;
-  const categoriesMap: { [key: string]: number } = {};
-
-  if (Array.isArray(rows)) {
-    rows.forEach((row: any) => {
+    // Fetch newly created categories to match IDs
+    const categoriesRows = await query("SELECT id, name FROM categories");
+    const categoriesMap: { [key: string]: number } = {};
+    categoriesRows.rows.forEach((row) => {
       categoriesMap[row.name] = row.id;
     });
-  }
 
-  // 2. Seed Products (if table is empty)
-  const checkProductResult: any = await query("SELECT COUNT(*) as count FROM products");
-  const firstRow = Array.isArray(checkProductResult) 
-    ? (Array.isArray(checkProductResult[0]) ? checkProductResult[0][0] : checkProductResult[0]) 
-    : checkProductResult;
-  const productCount = parseInt(firstRow?.count ?? firstRow?.["COUNT(*)"] ?? 0, 10);
-
-  if (productCount === 0) {
     console.log("DB_MIGRATIONS: Seeding catalog products...");
 
+    // Seed Products
     const productsToSeed = [
       {
         category_id: categoriesMap["Electronics"],
@@ -219,26 +200,33 @@ async function seedInitialData() {
     ];
 
     for (const p of productsToSeed) {
-      if (!p.category_id) continue;
       await query(
-        `INSERT IGNORE INTO products (category_id, name, slug, description, price, stock, images) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO products (category_id, name, slug, description, price, stock, images) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
         [p.category_id, p.name, p.slug, p.description, p.price, p.stock, p.images]
       );
     }
   }
 
-  // 3. Seed Initial Users using INSERT IGNORE
-  const adminPasswordHash = await bcrypt.hash("admin123", 10);
-  const userPasswordHash = await bcrypt.hash("user123", 10);
+  // Check if users are seeded
+  const checkUsers = await query("SELECT COUNT(*) as count FROM users");
+  const usersCount = parseInt(checkUsers.rows[0].count, 10);
 
-  await query(
-    "INSERT IGNORE INTO users (email, password_hash, role) VALUES (?, ?, ?)",
-    ["admin@catalog.com", adminPasswordHash, "admin"]
-  );
-  await query(
-    "INSERT IGNORE INTO users (email, password_hash, role) VALUES (?, ?, ?)",
-    ["user@catalog.com", userPasswordHash, "user"]
-  );
-  console.log("DB_MIGRATIONS: Seeded default categories, products, and user accounts.");
+  if (usersCount === 0) {
+    console.log("DB_MIGRATIONS: Seeding administrator and standard test accounts...");
+    const adminPasswordHash = await bcrypt.hash("admin123", 10);
+    const userPasswordHash = await bcrypt.hash("user123", 10);
+
+    // Create Admin
+    await query(
+      "INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)",
+      ["admin@catalog.com", adminPasswordHash, "admin"]
+    );
+    // Create Normal User
+    await query(
+      "INSERT INTO users (email, password_hash, role) VALUES ($1, $2, $3)",
+      ["user@catalog.com", userPasswordHash, "user"]
+    );
+    console.log("DB_MIGRATIONS: [DONE] Seeded admin@catalog.com (admin123) & user@catalog.com (user123).");
+  }
 }

@@ -23,28 +23,6 @@ export interface QueryResult<T = any> {
 }
 
 /**
- * Retries connecting to MySQL until the database server is completely initialized and ready.
- */
-export async function waitForDatabase(maxRetries = 15, delayMs = 2000): Promise<void> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const conn = await pool.getConnection();
-      conn.release();
-      console.log("DB_CONNECTION: Successfully established connection with MySQL!");
-      return;
-    } catch (err: any) {
-      console.log(
-        `DB_CONNECTION: MySQL not ready yet (${err.code || err.message}). Retrying connection attempt ${attempt}/${maxRetries} in ${delayMs / 1000}s...`
-      );
-      if (attempt === maxRetries) {
-        throw new Error("Could not connect to MySQL server after maximum retries.");
-      }
-      await new Promise((res) => setTimeout(res, delayMs));
-    }
-  }
-}
-
-/**
  * Generic Raw SQL Query executor for MySQL
  */
 export async function query<T = any>(text: string, params: any[] = []): Promise<QueryResult<T>> {
